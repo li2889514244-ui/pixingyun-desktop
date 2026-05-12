@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MatrixFlow 桌面伴侣</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'Microsoft YaHei',sans-serif;background:#0f0f1a;color:#e0e0e8;min-height:100vh;display:flex;justify-content:center;padding:20px}
+.container{max-width:680px;width:100%}
+.header{text-align:center;padding:40px 0 30px}
+.header h1{font-size:28px;background:linear-gradient(135deg,#7c5cfc,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.header p{color:#888;margin-top:8px;font-size:14px}
+
+/* 登录/Token */
+.auth-box{background:#1a1a2e;border:1px solid #2a2a4a;border-radius:16px;padding:24px;margin-bottom:20px}
+.auth-box h2{font-size:16px;margin-bottom:12px;color:#a78bfa}
+.auth-box input{width:100%;padding:14px;background:#0f0f1a;border:1px solid #333;border-radius:12px;color:#fff;font-size:15px;margin-bottom:10px}
+.auth-box button{width:100%;padding:14px;background:linear-gradient(135deg,#7c5cfc,#9b7eff);border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:600;cursor:pointer;transition:all .2s}
+.auth-box button:hover{transform:translateY(-1px);box-shadow:0 4px 20px rgba(124,92,252,.3)}
+.auth-box button:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.status-text{text-align:center;margin-top:10px;font-size:13px;color:#888}
+
+/* 平台选择 */
+.platform-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
+.platform-card{background:#1a1a2e;border:2px solid #2a2a4a;border-radius:14px;padding:20px;text-align:center;cursor:pointer;transition:all .2s}
+.platform-card:hover{border-color:#7c5cfc;transform:translateY(-2px)}
+.platform-card.selected{border-color:#7c5cfc;background:#1f1f3a}
+.platform-card .icon{font-size:32px;margin-bottom:8px}
+.platform-card .name{font-size:14px;font-weight:600}
+
+/* 账号列表 */
+.account-list{margin-top:20px}
+.account-item{display:flex;align-items:center;gap:12px;padding:14px;background:#1a1a2e;border:1px solid #2a2a4a;border-radius:12px;margin-bottom:8px}
+.account-item .plat-icon{font-size:24px}
+.account-item .info{flex:1}
+.account-item .info .nick{font-weight:600}
+.account-item .info .plat{font-size:12px;color:#888}
+.account-item .status{width:8px;height:8px;border-radius:50%;background:#30d158}
+
+.empty-state{text-align:center;padding:40px;color:#666}
+.empty-state .icon{font-size:48px;margin-bottom:12px}
+.hint{font-size:12px;color:#666;text-align:center;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>MatrixFlow 桌面伴侣</h1>
+    <p id="headerHint">请先登录 MatrixFlow 账号</p>
+  </div>
+
+  <!-- 登录区 -->
+  <div class="auth-box" id="authBox">
+    <h2>🔑 登录 MatrixFlow</h2>
+    <input type="email" id="emailInput" placeholder="邮箱" value="admin@matrixflow.io">
+    <input type="password" id="passInput" placeholder="密码" value="Test12345">
+    <button onclick="doLogin()">登录</button>
+    <div class="status-text" id="authStatus"></div>
+  </div>
+
+  <!-- 平台选择（登录后显示） -->
+  <div id="platformSection" style="display:none">
+    <h3 style="margin-bottom:12px;font-size:16px">选择要绑定的平台</h3>
+    <div class="platform-grid" id="platformGrid">
+      <div class="platform-card" onclick="startLogin('douyin')">
+        <div class="icon">🎵</div>
+        <div class="name">抖音</div>
+      </div>
+      <div class="platform-card" onclick="startLogin('xiaohongshu')">
+        <div class="icon">📕</div>
+        <div class="name">小红书</div>
+      </div>
+      <div class="platform-card" onclick="startLogin('kuaishou')">
+        <div class="icon">📱</div>
+        <div class="name">快手</div>
+      </div>
+      <div class="platform-card" onclick="startLogin('bilibili')">
+        <div class="icon">📺</div>
+        <div class="name">B站</div>
+      </div>
+      <div class="platform-card" onclick="startLogin('weibo')">
+        <div class="icon">🔴</div>
+        <div class="name">微博</div>
+      </div>
+    </div>
+    <div class="status-text" id="scanStatus"></div>
+  </div>
+
+  <!-- 账号列表 -->
+  <div id="accountsSection" style="display:none">
+    <h3 style="margin-bottom:12px;font-size:16px">已绑定账号</h3>
+    <div class="account-list" id="accountList"></div>
+  </div>
+
+  <div class="hint">v1.0 | Cookie 加密上传到 ddddkiii.com</div>
+</div>
+
+<script>
+let token = '';
+let currentSession = null;
+
+async function doLogin() {
+  const email = document.getElementById('emailInput').value;
+  const password = document.getElementById('passInput').value;
+  document.getElementById('authStatus').textContent = '登录中...';
+  
+  try {
+    const res = await fetch('https://ddddkiii.com/api/v1/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({email, password})
+    });
+    const data = await res.json();
+    if (data.code === 0) {
+      token = data.data.accessToken;
+      document.getElementById('authStatus').textContent = '✅ 登录成功';
+      document.getElementById('authBox').style.display = 'none';
+      document.getElementById('headerHint').textContent = '点击平台卡片绑定账号';
+      document.getElementById('platformSection').style.display = 'block';
+      loadAccounts();
+    } else {
+      document.getElementById('authStatus').textContent = '❌ ' + (data.message || '登录失败');
+    }
+  } catch(e) {
+    document.getElementById('authStatus').textContent = '❌ 网络错误';
+  }
+}
+
+async function startLogin(platform) {
+  if (!token) return;
+  document.getElementById('scanStatus').textContent = '正在打开浏览器...';
+  
+  // 高亮选中
+  document.querySelectorAll('.platform-card').forEach(c => c.classList.remove('selected'));
+  event.target.closest('.platform-card')?.classList.add('selected');
+  
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({platform, token})
+    });
+    const data = await res.json();
+    currentSession = data.session_id;
+    document.getElementById('scanStatus').textContent = '📱 请在弹出窗口中扫码登录 ' + data.platform;
+    
+    // 轮询状态
+    pollStatus();
+  } catch(e) {
+    document.getElementById('scanStatus').textContent = '❌ 启动失败';
+  }
+}
+
+async function pollStatus() {
+  if (!currentSession) return;
+  const res = await fetch('/api/login/status/' + currentSession);
+  const data = await res.json();
+  
+  if (data.status === 'done') {
+    document.getElementById('scanStatus').textContent = '✅ 绑定成功！';
+    currentSession = null;
+    loadAccounts();
+    return;
+  }
+  if (data.status === 'error') {
+    document.getElementById('scanStatus').textContent = '❌ ' + data.error;
+    return;
+  }
+  
+  setTimeout(pollStatus, 2000);
+}
+
+async function loadAccounts() {
+  if (!token) return;
+  try {
+    const res = await fetch('https://ddddkiii.com/api/v1/accounts', {
+      headers: {'Authorization': 'Bearer ' + token}
+    });
+    const data = await res.json();
+    const accounts = data.data?.accounts || [];
+    
+    if (accounts.length > 0) {
+      document.getElementById('accountsSection').style.display = 'block';
+      document.getElementById('accountList').innerHTML = accounts.map(a => 
+        `<div class="account-item">
+          <div class="plat-icon">${getIcon(a.platform)}</div>
+          <div class="info">
+            <div class="nick">${a.nickname || a.platformUserId || '未命名'}</div>
+            <div class="plat">${a.platform}</div>
+          </div>
+          <div class="status"></div>
+        </div>`
+      ).join('');
+    }
+  } catch(e) {}
+}
+
+function getIcon(p) {
+  const icons = {DOUYIN:'🎵',XIAOHONGSHU:'📕',KUAISHOU:'📱',BILIBILI:'📺',WEIBO:'🔴'};
+  return icons[p] || '🔗';
+}
+</script>
+</body>
+</html>

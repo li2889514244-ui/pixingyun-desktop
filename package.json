@@ -1,0 +1,13 @@
+{
+  "name": "matrixflow-desktop",
+  "version": "1.0.0",
+  "description": "MatrixFlow 桌面伴侣 - 扫码登录 / 多账号管理",
+  "main": "server.cjs",
+  "scripts": {
+    "start": "node server.cjs"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "playwright": "^1.44.0"
+  }
+}
