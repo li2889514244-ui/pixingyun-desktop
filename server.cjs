@@ -1,108 +1,83 @@
-// 披星云桌面伴侣 v1.1
+// 披星云桌面伴侣 v1.2
 const express = require('express');
 const { chromium } = require('playwright');
 const https = require('https');
 const { exec } = require('child_process');
 
 const PORT = 3456;
-const API_HOSTS = ['ddddkiii.com', '8.134.218.39'];
-let activeHost = API_HOSTS[0];
+const API_HOST = 'ddddkiii.com';
 
 const app = express();
 app.use(express.json());
+
+// === API 代理：Node.js 直连后端，绕过浏览器代理 ===
+app.all('/api/proxy/*', async (req, res) => {
+  const apiPath = req.path.replace('/api/proxy', '');
+  const opts = {
+    hostname: API_HOST, path: '/api/v1' + apiPath, method: req.method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(req.headers.authorization ? { 'Authorization': req.headers.authorization } : {})
+    },
+    timeout: 15000,
+    rejectUnauthorized: false,
+  };
+  const apiReq = https.request(opts, (apiRes) => {
+    let d = '';
+    apiRes.on('data', c => d += c);
+    apiRes.on('end', () => {
+      try { res.json(JSON.parse(d)); } catch(e) { res.status(502).json({ error: 'Invalid response' }); }
+    });
+  });
+  apiReq.on('error', () => res.status(502).json({ error: 'API unreachable' }));
+  apiReq.on('timeout', () => { apiReq.destroy(); res.status(504).json({ error: 'Timeout' }); });
+  if (req.body && Object.keys(req.body).length > 0) apiReq.write(JSON.stringify(req.body));
+  apiReq.end();
+});
+
 app.use(express.static(__dirname));
 
+// === 浏览器自动化 ===
 const sessions = {};
 let browser = null;
 
-// ========== Tools ==========
-
-function apiRequest(method, path, body, token) {
-  return new Promise((resolve) => {
-    const tryHost = (idx) => {
-      if (idx >= API_HOSTS.length) return resolve(null);
-      const host = API_HOSTS[idx];
-      const url = new URL('https://' + host + '/api/v1' + path);
-      const opts = {
-        hostname: url.hostname, path: url.pathname + url.search, method,
-        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': 'Bearer ' + token } : {}) },
-        timeout: 10000,
-      };
-      const req = https.request(opts, (res) => {
-        let d = '';
-        res.on('data', c => d += c);
-        res.on('end', () => {
-          try { resolve(JSON.parse(d)); } catch(e) { tryHost(idx + 1); }
-        });
-      });
-      req.on('error', () => tryHost(idx + 1));
-      req.on('timeout', () => { req.destroy(); tryHost(idx + 1); });
-      if (body) req.write(JSON.stringify(body));
-      req.end();
-    };
-    tryHost(0);
-  });
-}
-
-// ========== API ==========
-
 app.post('/api/login', async (req, res) => {
   const { platform, token } = req.body;
-  if (!platform) return res.status(400).json({ error: '请选择平台' });
-
   const sid = Math.random().toString(36).slice(2, 10);
-  const platformConfig = {
+  const configs = {
     douyin: { name: '抖音', url: 'https://creator.douyin.com' },
     xiaohongshu: { name: '小红书', url: 'https://creator.xiaohongshu.com' },
     kuaishou: { name: '快手', url: 'https://cp.kuaishou.com' },
     bilibili: { name: 'B站', url: 'https://member.bilibili.com' },
     weibo: { name: '微博', url: 'https://weibo.com' },
   };
-  const config = platformConfig[platform];
-  if (!config) return res.status(400).json({ error: '不支持的平台' });
+  const cfg = configs[platform];
+  if (!cfg) return res.status(400).json({ error: '不支持' });
 
-  sessions[sid] = { platform, status: 'launching', name: config.name };
+  sessions[sid] = { platform, status: 'launching', name: cfg.name };
+  res.json({ session_id: sid, status: 'launching', platform: cfg.name });
 
-  (async () => {
-    try {
-      if (!browser || !browser.isConnected()) {
-        browser = await chromium.launch({ headless: false, args: ['--no-sandbox'] });
-      }
-      const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'zh-CN' });
-      const page = await context.newPage();
-      await page.goto(config.url, { waitUntil: 'networkidle', timeout: 30000 });
-      sessions[sid] = { ...sessions[sid], status: 'scanning', page, context, token };
-      console.log(`[${sid}] ${config.name} 登录页已打开`);
-    } catch(e) {
-      sessions[sid] = { ...sessions[sid], status: 'error', error: e.message };
-    }
-  })();
-
-  res.json({ session_id: sid, status: 'launching', platform: config.name });
+  try {
+    if (!browser?.isConnected()) browser = await chromium.launch({ headless: false, args: ['--no-sandbox'] });
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'zh-CN' });
+    const page = await ctx.newPage();
+    await page.goto(cfg.url, { waitUntil: 'networkidle', timeout: 30000 });
+    sessions[sid] = { ...sessions[sid], status: 'scanning', page, context: ctx, token };
+  } catch(e) { sessions[sid].status = 'error'; sessions[sid].error = e.message; }
 });
 
 app.get('/api/login/status/:sid', async (req, res) => {
   const s = sessions[req.params.sid];
   if (!s) return res.json({ status: 'not_found' });
-  if (s.status === 'error') return res.json({ status: 'error', error: s.error });
   if (s.status === 'done') return res.json({ status: 'done', account: s.account });
-  
+  if (s.status === 'error') return res.json({ status: 'error', error: s.error });
   if (s.page) {
     try {
       const cookies = await s.page.context().cookies();
-      const meaningful = cookies.filter(c => c.name && c.value?.length > 5);
-      if (meaningful.length >= 3) {
-        const result = await apiRequest('POST', '/accounts', {
-          platform: s.platform.toUpperCase(),
-          platformUserId: s.name + '_' + Date.now().toString(36),
-          nickname: s.name + '账号',
-          cookies: JSON.stringify(meaningful),
-        }, s.token);
-        
-        s.status = 'done';
-        s.account = { platform: s.platform, name: s.name };
-        if (s.page) { await s.page.close().catch(()=>{}); delete s.page; }
-        if (s.context) { await s.context.close().catch(()=>{}); delete s.context; }
+      if (cookies.filter(c => c.name && c.value?.length > 5).length >= 3) {
+        s.status = 'done'; s.account = { platform: s.platform, name: s.name };
+        await s.page.close().catch(()=>{}); delete s.page;
+        await s.context.close().catch(()=>{}); delete s.context;
         return res.json({ status: 'done', account: s.account });
       }
     } catch(e) {}
@@ -112,14 +87,8 @@ app.get('/api/login/status/:sid', async (req, res) => {
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
-// ========== Start ==========
 app.listen(PORT, () => {
-  console.log('\n披星云桌面伴侣已启动');
-  console.log('浏览器打开 http://localhost:' + PORT + '\n');
+  console.log('披星云桌面伴侣已启动 http://localhost:' + PORT);
   exec('start http://localhost:' + PORT);
 });
-
-process.on('SIGINT', async () => {
-  if (browser) await browser.close().catch(()=>{});
-  process.exit();
-});
+process.on('SIGINT', async () => { if (browser) await browser.close().catch(()=>{}); process.exit(); });
