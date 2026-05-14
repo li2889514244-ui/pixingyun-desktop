@@ -1,20 +1,13 @@
-@echo off
-chcp 65001 >nul
-TITLE MatrixFlow 本地扫码服务
+﻿@echo off
+TITLE 披星云桌面伴侣
 cd /d "%~dp0"
 
-echo ========================================
-echo   MatrixFlow 本地扫码服务
-echo   http://localhost:5409
-echo ========================================
-echo.
-echo 支持平台: 抖音 / 小红书 / 快手 / 视频号
-echo.
-echo 在 MatrixFlow 网页中点击"添加平台账号"即可使用
-echo.
-echo 按 Ctrl+C 停止服务
-echo ========================================
+set PY=
+for %%v in (Python312 Python313 Python311 Python310) do (
+    if exist "C:\Users\%USERNAME%\AppData\Local\Programs\Python\%%v\pythonw.exe" set PY=C:\Users\%USERNAME%\AppData\Local\Programs\Python\%%v\pythonw.exe
+)
+if "%PY%"=="" where pythonw >nul 2>&1 && set PY=pythonw
+if "%PY%"=="" where python >nul 2>&1 && set PY=python
+if "%PY%"=="" echo 请先安装 Python 3.10+ && pause && exit /b 1
 
-python sau_backend.py
-
-pause
+start "" "%PY%" "%~dp0MatrixFlow桌面伴侣.pyw"
