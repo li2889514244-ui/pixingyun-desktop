@@ -286,6 +286,6 @@ if __name__ == '__main__':
     print('=' * 50)
     print('  披星云桌面伴侣 v2.1')
     print('  http://localhost:5409')
-    print(f'  平台: {\" | \".join(p[\"name\"] for p in PLATFORMS.values())}')
+    print(f'  平台: {" | ".join(p["name"] for p in PLATFORMS.values())}')
     print('=' * 50)
     app.run(host='127.0.0.1', port=5409, debug=False)
