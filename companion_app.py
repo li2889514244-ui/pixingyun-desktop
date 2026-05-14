@@ -1,5 +1,5 @@
 """
-披星云桌面伴侣 v2.1 — 带 UI 界面，一键扫码
+披星云桌面伴侣 v2.2 — 带 UI 界面，一键扫码
 用法: python companion_app.py
 """
 import asyncio, json, os, threading, time, uuid, base64
@@ -92,7 +92,7 @@ body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#f0f2f5;c
 <div class="status-bar">
   <div class="ind" :class="siteConnected?'on':'off'"></div>
   <span>{{ siteConnected ? '已连接到 MatrixFlow 网站' : '等待网站连接... (在 MatrixFlow 网页中点击"添加账号")' }}</span>
-  <span style="margin-left:auto;color:#999;font-size:12px">v2.1</span>
+  <span style="margin-left:auto;color:#999;font-size:12px">v2.2</span>
 </div>
 
 <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
@@ -316,7 +316,7 @@ def scan_bind_start():
 # ── Main ──────────────────────────────────────────────────────
 if __name__ == '__main__':
     print('=' * 50)
-    print('  披星云桌面伴侣 v2.1')
+    print('  披星云桌面伴侣 v2.2')
     print('  http://localhost:5409')
     print(f'  平台: {" | ".join(p["name"] for p in PLATFORMS.values())}')
     print('=' * 50)
