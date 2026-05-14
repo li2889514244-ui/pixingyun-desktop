@@ -125,12 +125,12 @@ class MatrixFlowApp(ctk.CTk):
             pass
         self.after(500, self._poll_queue)
 
-    # ── 手动点击平台按钮（没有 token） ──
+    # ── 手动点击平台按钮（引导用户通过网站发起） ──
     def _manual_scan(self, pid):
         if self.scanning: return
-        # 提示用户先登录
-        self._msg("ℹ️","请先在网站登录","点击\"打开 MatrixFlow 网站\"→登录→添加账号→选择平台\n网站会自动触发桌面伴侣")
-        webbrowser.open(SITE_URL)
+        info = PLATFORM_INFO[pid]
+        self._msg("ℹ️",f"请通过网站发起绑定",
+                  f"1. 打开 MatrixFlow 网站并登录\n2. 点击\"添加账号\" → 选择{info[0]}\n3. 网站会自动触发桌面伴侣弹出 Chrome")
 
     # ── 网站检测 ──
     def _check_site(self):
