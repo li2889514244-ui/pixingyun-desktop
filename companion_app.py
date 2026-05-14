@@ -80,7 +80,7 @@ body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#f0f2f5;c
         </div>
       </template>
       <div v-if="status==='loading'"><div class="spinner"></div><p class="waiting">正在启动浏览器...</p></div>
-      <div v-if="status==='browser'"><p style="color:#4caf50;font-size:18px;margin-bottom:8px">浏览器已打开</p><p class="tip">请在 Chrome 窗口中扫码登录</p><div class="spinner"></div><p class="waiting">等待登录完成...</p><div class="progress"><div class="fill" :style="{width:progress+'%'}"></div></div></div>
+      <div v-if="status==='browser'"><p style="color:#4caf50;font-size:18px;margin-bottom:8px">浏览器已打开</p><p class="tip">请在 Chrome 窗口中扫码登录</p><p class="waiting" style="margin:4px 0">登录成功后，点击下方按钮</p><button class="btn" style="background:#4caf50;font-size:16px;padding:12px 32px;margin:8px 0" @click="confirmLogin">已完成登录，提取 Cookie</button><br><button class="btn" style="background:#999;margin-top:4px" @click="cancelScan">取消</button></div>
       <div v-if="status==='scan'"><img class="qr" :src="qrUrl" v-if="qrUrl"><p class="tip">用手机扫描上方二维码</p></div>
       <div v-if="status==='uploading'"><div class="spinner"></div><p class="waiting">登录成功！正在上传 Cookie...</p></div>
       <div v-if="status==='done'"><div class="success">&#10003;</div><p style="color:#4caf50;font-size:16px">绑定成功！</p><p style="color:#999;margin:8px 0">刷新 MatrixFlow 网页即可看到新账号</p></div>
@@ -100,7 +100,7 @@ body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#f0f2f5;c
 const {createApp}=Vue
 createApp({data(){return{
   platforms:[{id:'douyin',name:'抖音',icon:'🎵',hint:'扫码登录'},{id:'xiaohongshu',name:'小红书',icon:'📕',hint:'扫码登录'},{id:'kuaishou',name:'快手',icon:'🎬',hint:'扫码登录'},{id:'tencent',name:'视频号',icon:'📺',hint:'微信扫码'}],
-  selected:'',status:'idle',qrUrl:'',errorMsg:'',siteConnected:false,evtSource:null,progress:0,timer:null,platformFromUrl:'',tokenFromUrl:'',apiFromUrl:''
+  selected:'',status:'idle',qrUrl:'',errorMsg:'',siteConnected:false,evtSource:null,progress:0,timer:null,platformFromUrl:'',tokenFromUrl:'',apiFromUrl:'',sessionId:''
 }},computed:{selectedPlatform(){return this.platforms.find(p=>p.id===this.selected)}},
 methods:{
   selectPlatform(id){
@@ -119,7 +119,8 @@ methods:{
     this.evtSource=new EventSource(url)
     this.evtSource.onmessage=e=>{
       try{const d=JSON.parse(e.data)
-        if(d.type==='qr_code'){this.status='scan';this.qrUrl=d.data}
+        if(d.type==='session'){this.sessionId=d.data}
+        else if(d.type==='qr_code'){this.status='scan';this.qrUrl=d.data}
         else if(d.type==='browser'){this.status='browser';this.progress=50}
         else if(d.type==='status'){if(d.data.includes('上传'))this.status='uploading'}
         else if(d.type==='success'){this.status='done';this.progress=100;clearInterval(this.timer);this.evtSource.close()}
@@ -128,13 +129,22 @@ methods:{
     }
     this.evtSource.onerror=()=>{if(this.status!=='done'){this.status='error';this.errorMsg='连接中断，请重试';clearInterval(this.timer)}}
   },
-  reset(){this.evtSource?.close();clearInterval(this.timer);this.status='idle';this.qrUrl='';this.errorMsg='';this.selected='';this.progress=0}
+  reset(){this.evtSource?.close();clearInterval(this.timer);this.status='idle';this.qrUrl='';this.errorMsg='';this.selected='';this.progress=0},
+confirmLogin(){
+  if(!this.sessionId)return
+  fetch('/api/confirm-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:this.sessionId})})
+},
+cancelScan(){
+  if(this.sessionId){fetch('/api/cancel-scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:this.sessionId})})}
+  this.reset()
+}
 },
 mounted(){
   this.platformFromUrl=this.getParam('platform')
   this.tokenFromUrl=this.getParam('token')
   this.apiFromUrl=this.getParam('api')
-  if(this.platformFromUrl&&this.tokenFromUrl){this.selectPlatform(this.platformFromUrl)}
+  // 不自动启动——等用户手动点平台按钮
+  if(this.platformFromUrl&&this.tokenFromUrl){this.selected=this.platformFromUrl}
   setInterval(async()=>{try{const r=await fetch('/health');if(r.ok)this.siteConnected=true}catch{this.siteConnected=false}},3000)
 }}).mount('body')
 </script></body></html>'''
@@ -146,11 +156,30 @@ def index():
     resp.headers['Content-Type'] = 'text/html; charset=utf-8'
     return resp
 
+# 当前活跃的扫码会话
+active_sessions = {}  # session_id -> queue
+
 @app.route('/health')
 def health():
     resp = make_response(jsonify({'status':'ok','platforms':list(PLATFORMS.keys())}))
     resp.headers['Access-Control-Allow-Origin'] = '*'
     return resp
+
+@app.route('/api/confirm-login', methods=['POST'])
+def confirm_login():
+    sid = request.json.get('session_id', '') if request.is_json else request.args.get('session_id', '')
+    if sid in active_sessions:
+        active_sessions[sid].put('EXTRACT_COOKIES')
+        return jsonify({'code':0,'msg':'ok'})
+    return jsonify({'code':404,'msg':'session not found'}), 404
+
+@app.route('/api/cancel-scan', methods=['POST'])
+def cancel_scan():
+    sid = request.json.get('session_id', '') if request.is_json else request.args.get('session_id', '')
+    if sid in active_sessions:
+        active_sessions[sid].put('CANCEL')
+        return jsonify({'code':0,'msg':'ok'})
+    return jsonify({'code':404,'msg':'session not found'}), 404
 
 @app.route('/api/scan-bind/start')
 def scan_bind_start():
@@ -164,7 +193,9 @@ def scan_bind_start():
         return jsonify({'code':400,'msg':f'不支持的平台: {platform}'}), 400
 
     info = PLATFORMS[platform]
+    session_id = uuid.uuid4().hex[:12]
     queue: Queue = Queue()
+    active_sessions[session_id] = queue
 
     def login_worker():
         async def _run():
@@ -195,31 +226,25 @@ def scan_bind_start():
                     except:
                         pass
 
-                    queue.put(json.dumps({'type':'status','data':'请在弹出的 Chrome 窗口中扫码登录，等待中...'}))
+                    queue.put(json.dumps({'type':'status','data':'请在 Chrome 窗口中完成扫码登录，然后回到此页面点"已完成登录"'}))
 
-                    original_url = page.url
-
-                    # 等待登录完成（URL变化或Cookie出现，最多等5分钟）
-                    logged_in = False
-                    for i in range(300):
-                        await page.wait_for_timeout(1000)
+                    # 等待用户确认（最多等5分钟，每0.5秒检查一次队列）
+                    for i in range(600):
+                        await page.wait_for_timeout(500)
                         try:
-                            # 检查URL是否变化（登录成功通常会跳转）
-                            current_url = page.url
-                            if current_url != original_url and 'login' not in current_url.lower():
-                                logged_in = True
+                            msg = queue.get_nowait()
+                            if msg == 'EXTRACT_COOKIES':
                                 break
-                            # 或者检查 Cookie 是否出现
-                            cookies = await context.cookies()
-                            if len(cookies) > 3:  # 多于初始的几个 cookie
-                                logged_in = True
-                                break
-                        except:
+                            if msg == 'CANCEL':
+                                queue.put(json.dumps({'type':'error','data':'用户取消'}))
+                                await browser.close()
+                                return
+                        except Empty:
                             pass
-
-                    if not logged_in:
-                        # 超时——仍然尝试获取 cookie
-                        pass
+                    else:
+                        queue.put(json.dumps({'type':'error','data':'操作超时（5分钟），请重试'}))
+                        await browser.close()
+                        return
 
                     queue.put(json.dumps({'type':'status','data':'正在提取 Cookie...'}))
 
@@ -228,7 +253,7 @@ def scan_bind_start():
                     cookie_str = '; '.join(f"{c['name']}={c['value']}" for c in cookies)
 
                     if not cookie_str:
-                        queue.put(json.dumps({'type':'error','data':'未能获取到 Cookie，请在 Chrome 窗口中确认已登录'}))
+                        queue.put(json.dumps({'type':'error','data':'未获取到 Cookie，请在 Chrome 窗口中确认已登录'}))
                         await browser.close()
                         return
 
@@ -258,6 +283,9 @@ def scan_bind_start():
         asyncio.run(_run())
 
     def sse_stream():
+        # 先发送 session_id
+        yield f"data: {json.dumps({'type':'session','data':session_id})}\n\n"
+
         t = threading.Thread(target=login_worker, daemon=True)
         t.start()
 
@@ -277,9 +305,13 @@ def scan_bind_start():
             elif isinstance(msg, dict):
                 yield f"data: {json.dumps(msg)}\n\n"
 
-    return Response(sse_stream(), mimetype='text/event-stream',
+    resp = Response(sse_stream(), mimetype='text/event-stream',
                     headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no',
                              'Access-Control-Allow-Origin':'*'})
+    @resp.call_on_close
+    def cleanup():
+        active_sessions.pop(session_id, None)
+    return resp
 
 # ── Main ──────────────────────────────────────────────────────
 if __name__ == '__main__':
